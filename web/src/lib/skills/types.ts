@@ -3,7 +3,21 @@
  * `backend/onyx/server/features/skill/models.py`.
  */
 
-export type SkillInstallationPolicy = "AVAILABLE" | "DEFAULT" | "REQUIRED";
+export type SkillInstallationPolicy =
+  | "AVAILABLE"
+  | "DEFAULT"
+  | "REQUIRED"
+  | "NOT_AVAILABLE";
+
+/** A marketplace default cannot be REQUIRED. */
+export type OrganizationLibraryDefaultPolicy = Exclude<
+  SkillInstallationPolicy,
+  "REQUIRED"
+>;
+
+export interface OrganizationLibraryDefaultAccess {
+  installation_policy: OrganizationLibraryDefaultPolicy;
+}
 
 export type SkillSource = "builtin" | "custom";
 export type SkillAccessLevel = "OWNER" | "EDITOR" | "VIEWER";
@@ -44,7 +58,14 @@ export interface Skill {
   is_personal: boolean;
   enabled: boolean;
   can_toggle: boolean;
+  /** The skill's own company setting; AVAILABLE when it has none. */
   installation_policy: SkillInstallationPolicy;
+  /** The company setting or a group setting that reaches the group is
+   * REQUIRED. Only an organization-wide skill manager can delete it then. */
+  required_for_anyone: boolean;
+  /** The setting for the current user is REQUIRED, from the company setting
+   * or one of their groups. */
+  required_for_user: boolean;
   author_user_id: string | null;
   author_email: string | null;
   owner: {

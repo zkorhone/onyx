@@ -848,8 +848,9 @@ export default function SkillEditorPage({
 
               {skill &&
                 canManageSkill &&
-                (skill.installation_policy !== "REQUIRED" || isAdmin) &&
-                (skill.public_permission === null || canManageOrgSkills) && (
+                ((skill.public_permission === null &&
+                  !skill.required_for_anyone) ||
+                  canManageOrgSkills) && (
                   <>
                     <Divider paddingParallel={0} paddingPerpendicular={0} />
 

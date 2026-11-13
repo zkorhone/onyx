@@ -100,13 +100,14 @@ export default function SkillCard({
   const { isGlobalHolder: canManageOrgSkills } = usePermissionAuthority(
     Permission.MANAGE_PLUGINS
   );
-  const isRequired =
-    item.source === "custom" && item.skill.installation_policy === "REQUIRED";
-  // Only an organization-wide skill manager can delete a published skill.
+  const isRequired = item.source === "custom" && item.skill.required_for_user;
+  // Only an organization-wide skill manager can delete a published or a
+  // required skill.
   const canDelete =
     item.source === "custom" &&
-    (!isRequired || isAdmin) &&
-    (item.skill.public_permission === null || canManageOrgSkills);
+    ((item.skill.public_permission === null &&
+      !item.skill.required_for_anyone) ||
+      canManageOrgSkills);
 
   const authorTitle =
     item.source === "builtin" ? appName : item.author_email || appName;

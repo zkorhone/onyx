@@ -56,6 +56,8 @@ function existingSkill(
     enabled: true,
     can_toggle: true,
     installation_policy: "AVAILABLE",
+    required_for_anyone: false,
+    required_for_user: false,
     author_user_id: "author-id",
     author_email: "author@example.com",
     owner: { id: "author-id", email: "author@example.com" },

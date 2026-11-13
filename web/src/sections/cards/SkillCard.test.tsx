@@ -51,6 +51,8 @@ function custom(overrides: Partial<CustomSkill> = {}): CustomSkillCardItem {
     enabled: true,
     can_toggle: true,
     installation_policy: "AVAILABLE",
+    required_for_anyone: false,
+    required_for_user: false,
     author_user_id: "user-id",
     author_email: "owner@example.com",
     owner: { id: "user-id", email: "owner@example.com" },
@@ -91,6 +93,8 @@ function invalidCustom(): CustomSkillCardItem {
     enabled: false,
     can_toggle: false,
     installation_policy: "AVAILABLE",
+    required_for_anyone: false,
+    required_for_user: false,
   });
 }
 
@@ -198,7 +202,7 @@ describe("SkillCard", () => {
     const user = setupUser();
     render(
       <SkillCard
-        item={custom({ installation_policy: "REQUIRED", can_toggle: false })}
+        item={custom({ required_for_user: true, can_toggle: false })}
       />
     );
 
@@ -211,7 +215,12 @@ describe("SkillCard", () => {
   it("shows required skills without a switch or delete action", () => {
     render(
       <SkillCard
-        item={custom({ installation_policy: "REQUIRED", can_toggle: false })}
+        item={custom({
+          installation_policy: "REQUIRED",
+          required_for_anyone: true,
+          required_for_user: true,
+          can_toggle: false,
+        })}
         onDelete={jest.fn()}
       />
     );
@@ -484,6 +493,25 @@ test.each(["OWNER", "EDITOR", "VIEWER"] as const)(
     const button = screen.queryByRole("button", { name: "Delete skill" });
     if (user_permission === "VIEWER") expect(button).not.toBeInTheDocument();
     else expect(button).toBeInTheDocument();
+  }
+);
+
+test.each([
+  { permissions: [], visible: false },
+  { permissions: ["manage:plugins"], visible: true },
+])(
+  "only an organization-wide manager sees Delete on a skill a group requires ($permissions)",
+  ({ permissions, visible }) => {
+    mockPermissions = permissions;
+    render(
+      <SkillCard
+        item={custom({ required_for_anyone: true })}
+        onDelete={jest.fn()}
+      />
+    );
+    const button = screen.queryByRole("button", { name: "Delete skill" });
+    if (visible) expect(button).toBeInTheDocument();
+    else expect(button).not.toBeInTheDocument();
   }
 );
 

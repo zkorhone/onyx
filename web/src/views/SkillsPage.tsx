@@ -696,18 +696,12 @@ export default function SkillsPage({ admin = false }: SkillsPageProps) {
                                         danger: true,
                                         disabled:
                                           !canManageSelected ||
-                                          (!isAdmin &&
-                                            selectedItems.some(
-                                              (item) =>
-                                                item.skill
-                                                  .installation_policy ===
-                                                "REQUIRED"
-                                            )) ||
                                           (!canManageOrgSkills &&
                                             selectedItems.some(
                                               (item) =>
                                                 item.skill.public_permission !==
-                                                null
+                                                  null ||
+                                                item.skill.required_for_anyone
                                             )),
                                         onSelect: () => {
                                           setBulkDeleteTargets(selectedItems);

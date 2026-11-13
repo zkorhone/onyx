@@ -390,3 +390,15 @@ def test_skill_dropped_by_resolution_does_not_crowd_out_later_skills(
     )
 
     assert set(files) == {"b-healthy/SKILL.md", "b-healthy/scripts/run.py"}
+
+
+def test_push_and_commit_keeps_the_callers_change_when_the_commit_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_session = MagicMock(spec=Session)
+    db_session.commit.side_effect = RuntimeError("connection lost")
+    monkeypatch.setattr(push, "push_skills_for_users", MagicMock())
+
+    push.push_skills_and_commit([uuid4()], db_session)
+
+    db_session.rollback.assert_called_once()
