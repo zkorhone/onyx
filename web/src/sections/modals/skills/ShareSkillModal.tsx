@@ -10,7 +10,7 @@ import useShareableGroups, {
   type MinimalUserGroupSnapshot,
 } from "@/hooks/useShareableGroups";
 import useShareableUsers from "@/hooks/useShareableUsers";
-import { Content, Section, toast } from "@opal/layouts";
+import { Content, InputPadder, Section, toast } from "@opal/layouts";
 import { useUser } from "@/providers/UserProvider";
 import { usePermissionAuthority } from "@/lib/permissions/hooks";
 import { Modal } from "@opal/components";
@@ -43,15 +43,30 @@ import type {
 } from "@/lib/skills/types";
 import {
   canChangeOrganizationAccess,
+  editedGroupRows,
+  groupAccessRows,
+  groupSettingChanges,
   serializeSkillSharing,
+  type GroupAccessRow,
   type SkillSharingDraft,
 } from "@/lib/skills/sharing";
+import {
+  INHERIT,
+  fromPolicyChoice,
+  isPolicyChoice,
+  toPolicyChoice,
+} from "@/lib/skills/installationPolicy";
+import {
+  useInstallationPolicyCopy,
+  usePolicyOptions,
+} from "@/lib/skills/hooks";
+import SkillGroupAccess from "@/sections/modals/skills/SkillGroupAccess";
 import { Permission, type MinimalUserSnapshot } from "@/lib/types";
 import {
   Button,
   Card,
+  InputSingleSelect,
   MessageCard,
-  SelectCard,
   Tabs,
   Text,
 } from "@opal/components";
@@ -59,7 +74,6 @@ import {
   SvgArrowExchange,
   SvgArrowLeft,
   SvgBubbleText,
-  SvgLock,
   SvgOrganization,
   SvgBlocks,
   SvgUser,
@@ -133,6 +147,14 @@ export default function ShareSkillModal(props: ShareSkillModalProps) {
   const { isGlobalHolder: isOrganizationManager } = usePermissionAuthority(
     Permission.MANAGE_PLUGINS
   );
+  const policyCopy = useInstallationPolicyCopy();
+  const policyCopyT = useTranslations("skills.installationPolicy");
+  const companyOptions = usePolicyOptions({
+    inherit: {
+      scope: "skill",
+      policy: loadedSkill?.default_installation_policy ?? null,
+    },
+  });
   const { mutate } = useSWRConfig();
   const publishAction = usePublishAction();
 
@@ -152,9 +174,13 @@ export default function ShareSkillModal(props: ShareSkillModalProps) {
     useState<TransferOwnershipTarget>(null);
   const [view, setView] = useState<ShareModalView>("share");
   const [installationPolicy, setInstallationPolicy] =
-    useState<SkillInstallationPolicy>("AVAILABLE");
+    useState<SkillInstallationPolicy | null>(null);
   const [initialPolicy, setInitialPolicy] =
-    useState<SkillInstallationPolicy>("AVAILABLE");
+    useState<SkillInstallationPolicy | null>(null);
+  const [groupRows, setGroupRows] = useState<GroupAccessRow[]>([]);
+  const [initialGroupRows, setInitialGroupRows] = useState<GroupAccessRow[]>(
+    []
+  );
   const [showIndividualAccess, setShowIndividualAccess] = useState(false);
   const [saving, setSaving] = useState(false);
   const [hydrated, setHydrated] = useState(false);
@@ -180,6 +206,16 @@ export default function ShareSkillModal(props: ShareSkillModalProps) {
     };
     setInstallationPolicy(skill.installation_policy);
     setInitialPolicy(skill.installation_policy);
+    const nextGroupRows: GroupAccessRow[] = (
+      loadedSkill?.group_summaries ?? []
+    ).map((summary) => ({
+      group_id: summary.group_id,
+      group_name: summary.group_name,
+      permission: summary.permission,
+      choice: toPolicyChoice(summary.installation_policy),
+    }));
+    setGroupRows(nextGroupRows);
+    setInitialGroupRows(nextGroupRows);
     setDraftState(nextState);
     setInitialState(nextState);
     setStagedUsers([]);
@@ -188,7 +224,7 @@ export default function ShareSkillModal(props: ShareSkillModalProps) {
     setTransferTarget(null);
     setView("share");
     setHydrated(true);
-  }, [open, skill, hydrated, skillId, isValidating, initialTab]);
+  }, [open, skill, loadedSkill, hydrated, skillId, isValidating, initialTab]);
 
   const effectiveState = useMemo(() => {
     if (!draftState) return null;
@@ -209,6 +245,16 @@ export default function ShareSkillModal(props: ShareSkillModalProps) {
   // Publishing is one-way: a saved published skill shows no private option.
   const isPublished = props.mode === "edit" && initialState?.isPublic === true;
   const isPublishing = !!effectiveState?.isPublic && !isPublished;
+  const canSetGroupSettings = props.mode === "edit" && isOrganizationManager;
+  // Each row's share comes from the share draft; groupRows holds the settings.
+  const shownGroupRows = useMemo(
+    () => groupAccessRows(groupRows, effectiveState?.groupShares ?? []),
+    [effectiveState, groupRows]
+  );
+  const groupChanges = useMemo(
+    () => groupSettingChanges(initialGroupRows, shownGroupRows),
+    [initialGroupRows, shownGroupRows]
+  );
   const viewerLabel = permissionOptions.find(
     (option) => option.value === "VIEWER"
   )?.label;
@@ -221,7 +267,8 @@ export default function ShareSkillModal(props: ShareSkillModalProps) {
     !!initialState &&
     (serializeDraftState(effectiveState) !==
       serializeDraftState(initialState) ||
-      installationPolicy !== initialPolicy);
+      installationPolicy !== initialPolicy ||
+      groupChanges.length > 0);
 
   const existingUserIds = useMemo(() => {
     const ids = new Set(draftState?.userShares.map((share) => share.user.id));
@@ -374,6 +421,9 @@ export default function ShareSkillModal(props: ShareSkillModalProps) {
         isAdmin,
         isOrganizationManager
       );
+      if (canSetGroupSettings && groupChanges.length > 0) {
+        payload.group_settings = groupChanges;
+      }
       const saved = await updateSkillShares(props.skillId, payload);
       void refreshSkill();
       if (
@@ -519,75 +569,44 @@ export default function ShareSkillModal(props: ShareSkillModalProps) {
               title={t("share.installation.title")}
               description={t("share.installation.description")}
             />
-            <Section
-              role="group"
-              flexDirection="row"
-              aria-label={t("share.installation.title")}
-              gap={2}
-              height="auto"
-              alignItems="stretch"
-            >
-              {(
-                [
-                  {
-                    value: "AVAILABLE",
-                    label: "available",
-                    icon: SvgUser,
-                  },
-                  {
-                    value: "DEFAULT",
-                    label: "default",
-                    icon: SvgOrganization,
-                  },
-                  {
-                    value: "REQUIRED",
-                    label: "required",
-                    icon: SvgLock,
-                  },
-                ] as const
-              ).map((option) => (
-                <Section key={option.value} height="full" className="min-w-0">
-                  <SelectCard
-                    role="button"
-                    aria-label={t(`share.installation.${option.label}`)}
-                    aria-pressed={installationPolicy === option.value}
-                    state={
-                      installationPolicy === option.value ? "selected" : "empty"
-                    }
-                    disabled={saving || !canEditShares}
-                    onClick={() => setInstallationPolicy(option.value)}
-                    padding={2}
-                    rounding={3}
-                  >
-                    <Section flexDirection="row" gap={2} height="auto">
-                      <option.icon
-                        size={18}
-                        aria-hidden
-                        className="shrink-0 stroke-text-03"
-                      />
-                      <Text font="main-ui-action">
-                        {t(`share.installation.${option.label}`)}
-                      </Text>
-                    </Section>
-                  </SelectCard>
-                </Section>
-              ))}
-            </Section>
+            <InputPadder>
+              <InputSingleSelect
+                placeholder={t("share.installation.title")}
+                value={toPolicyChoice(installationPolicy)}
+                defaultOption={INHERIT}
+                options={companyOptions}
+                disabled={saving || !canEditShares}
+                onValueChange={(value) => {
+                  if (isPolicyChoice(value))
+                    setInstallationPolicy(fromPolicyChoice(value));
+                }}
+              />
+            </InputPadder>
             <Text color="text-03" font="secondary-body" role="status">
-              {t(
-                `share.installation.${
-                  (
-                    {
-                      AVAILABLE: "availableDescription",
-                      DEFAULT: "defaultDescription",
-                      REQUIRED: "requiredDescription",
-                      NOT_AVAILABLE: "notAvailableDescription",
-                    } as const
-                  )[installationPolicy]
-                }`
-              )}
+              {installationPolicy === null
+                ? policyCopyT("inherit.description", { scope: "skill" })
+                : policyCopy.description(installationPolicy)}
             </Text>
           </Section>
+        )}
+
+        {canSetGroupSettings && (
+          <SkillGroupAccess
+            rows={shownGroupRows}
+            company={
+              installationPolicy ??
+              loadedSkill?.default_installation_policy ??
+              null
+            }
+            groups={shareableGroupsData ?? []}
+            description={t("share.groupAccess.description")}
+            disabled={saving}
+            onChange={(next) =>
+              setGroupRows((stored) =>
+                editedGroupRows(next, shownGroupRows, stored)
+              )
+            }
+          />
         )}
 
         {effectiveState.isPublic && (

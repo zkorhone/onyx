@@ -4,7 +4,11 @@ import { usePermissionAuthority } from "@/lib/permissions/hooks";
 import { useSettings } from "@/lib/settings/hooks";
 import { PluginPublishingPolicy } from "@/lib/settings/types";
 import { Permission } from "@/lib/types";
-import { INSTALLATION_POLICIES } from "@/lib/skills/installationPolicy";
+import {
+  INHERIT,
+  INSTALLATION_POLICIES,
+  type InheritOption,
+} from "@/lib/skills/installationPolicy";
 import type { SkillInstallationPolicy } from "@/lib/skills/types";
 
 export type PublishAction = "publish" | "review" | "off";
@@ -31,17 +35,35 @@ export function useInstallationPolicyCopy() {
 
 interface PolicyOptionsConfig {
   levels?: readonly SkillInstallationPolicy[];
+  inherit?: InheritOption;
 }
 
-/** The select options of an install setting. */
+/** The select options of an install setting, with an optional "no own
+ * setting" option first. */
 export function usePolicyOptions({
   levels = INSTALLATION_POLICIES,
+  inherit,
 }: PolicyOptionsConfig = {}): SelectOption[] {
+  const t = useTranslations("skills.installationPolicy.inherit");
   const copy = useInstallationPolicyCopy();
   const options: SelectOption[] = levels.map((policy) => ({
     value: policy,
     title: copy.label(policy),
     description: copy.description(policy),
   }));
-  return options;
+  if (!inherit) return options;
+  return [
+    {
+      value: INHERIT,
+      title:
+        inherit.policy === null
+          ? t("label", { scope: inherit.scope })
+          : t("labelWithPolicy", {
+              scope: inherit.scope,
+              policy: copy.label(inherit.policy),
+            }),
+      description: t("description", { scope: inherit.scope }),
+    },
+    ...options,
+  ];
 }

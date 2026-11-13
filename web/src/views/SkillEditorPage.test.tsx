@@ -56,6 +56,8 @@ function existingSkill(
     enabled: true,
     can_toggle: true,
     installation_policy: "AVAILABLE",
+    default_installation_policy: null,
+    group_summaries: [],
     required_for_anyone: false,
     required_for_user: false,
     author_user_id: "author-id",
