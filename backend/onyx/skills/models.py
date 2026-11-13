@@ -161,3 +161,17 @@ class GitHubSkillBundle(BaseModel):
     description: str | None
     bundle_bytes: bytes | None
     unavailable_reason: str | None = None
+
+
+class SkillUsageModel(BaseModel):
+    bytes: int
+    files: int
+
+
+class SkillLimitRefusal(BaseModel):
+    """Why a write was refused: the acting user's usage after it, and the
+    write limits."""
+
+    usage: SkillUsageModel
+    max_bytes: int
+    max_files: int
