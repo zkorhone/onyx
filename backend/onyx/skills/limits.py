@@ -12,6 +12,8 @@ from enum import IntEnum
 from typing import Final
 from uuid import UUID
 
+from onyx.skills.models import SkillLimitNotice, SkillOmission
+
 SKILL_WRITE_MAX_BYTES: Final[int] = 500 * 1024 * 1024
 SKILL_WRITE_MAX_FILES: Final[int] = 5_000
 
@@ -64,3 +66,13 @@ def runtime_keep_key(
     """Sort key of the run-time keep order: the group, then the most recent
     time first (empty is oldest), then the plugin id."""
     return (group, -(order_time or _OLDEST).timestamp(), plugin_id)
+
+
+def runtime_limit_notice(skills: list[SkillOmission]) -> SkillLimitNotice | None:
+    if not skills:
+        return None
+    return SkillLimitNotice(
+        skills=skills,
+        max_bytes=SKILL_RUNTIME_MAX_BYTES,
+        max_files=SKILL_RUNTIME_MAX_FILES,
+    )

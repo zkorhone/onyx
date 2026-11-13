@@ -82,6 +82,7 @@ from onyx.server.features.build.session.session_ready import ensure_session_read
 from onyx.server.features.build.session.streaming import SSE_KEEPALIVE
 from onyx.server.features.build.timeouts import POLL_INTERVAL_SECONDS
 from onyx.server.features.build.utils import sanitize_filename, validate_file
+from onyx.skills.limits import runtime_limit_notice
 from onyx.utils.logger import setup_logger
 from shared_configs.contextvars import get_current_tenant_id
 
@@ -217,7 +218,15 @@ def reload_session_skills(
 ) -> SessionSkillsStateResponse:
     skills_stale = SessionManager(db_session).reload_session_skills(session_id, user)
     db_session.commit()
-    return SessionSkillsStateResponse(skills_stale=skills_stale)
+    sandbox = get_sandbox_by_user_id(db_session, user.id)
+    return SessionSkillsStateResponse(
+        skills_stale=skills_stale,
+        skill_omissions=(
+            runtime_limit_notice(list(sandbox.skill_omissions))
+            if sandbox is not None
+            else None
+        ),
+    )
 
 
 @router.get("/{session_id}/sandbox-status")

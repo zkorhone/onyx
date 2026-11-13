@@ -60,6 +60,7 @@ import {
 } from "@/app/craft/services/apiServices";
 
 import { isAuthStatusError, isNotFoundError } from "@/lib/fetcher";
+import type { SkillLimitNotice } from "@/lib/skills/limits";
 
 import { genId } from "@/app/craft/utils/streamItemHelpers";
 import { parsePacket } from "@/app/craft/utils/parsePacket";
@@ -751,6 +752,11 @@ export interface BuildSessionData {
   skillsStale: boolean;
   /** Incremented only with skillsStale so async refreshes can reject stale responses. */
   skillsStaleRevision: number;
+  /** Skills the run-time limit left out of the user's sandbox. */
+  skillOmissions: SkillLimitNotice | null;
+  /** Counts writes of `skillOmissions`, so a slower read does not replace a
+   * newer one. */
+  skillOmissionsRevision: number;
   origin: SessionOrigin;
   abortController: AbortController;
   lastAccessed: Date;
@@ -1386,6 +1392,8 @@ const createInitialSessionData = (
     agentModel: null,
     skillsStale: false,
     skillsStaleRevision: 0,
+    skillOmissions: null,
+    skillOmissionsRevision: 0,
     origin: "INTERACTIVE",
     abortController: new AbortController(),
     lastAccessed: new Date(),
@@ -1599,6 +1607,10 @@ export const useBuildSessionStore = create<BuildSessionStore>()((set, get) => ({
           updates.skillsStale === undefined
             ? session.skillsStaleRevision
             : session.skillsStaleRevision + 1,
+        skillOmissionsRevision:
+          updates.skillOmissions === undefined
+            ? session.skillOmissionsRevision
+            : session.skillOmissionsRevision + 1,
         lastAccessed: new Date(),
       };
       const newSessions = new Map(state.sessions);
@@ -2188,6 +2200,11 @@ export const useBuildSessionStore = create<BuildSessionStore>()((set, get) => ({
     const canApplySkillsStale: () => boolean = () =>
       get().sessions.get(sessionId)?.skillsStaleRevision ===
       skillsStaleRevision;
+    const skillOmissionsRevision: number =
+      loadingSession.skillOmissionsRevision;
+    const canApplySkillOmissions: () => boolean = () =>
+      get().sessions.get(sessionId)?.skillOmissionsRevision ===
+      skillOmissionsRevision;
     let loadPhase: "history" | "runtime" = "history";
 
     try {
@@ -2316,6 +2333,9 @@ export const useBuildSessionStore = create<BuildSessionStore>()((set, get) => ({
         isLoaded: true,
         loadError: null,
         ...(canApplySkillsStale() && { skillsStale: sessionData.skills_stale }),
+        ...(canApplySkillOmissions() && {
+          skillOmissions: sessionData.skill_omissions,
+        }),
         origin: sessionData.origin,
       });
       if (!needsRestore) {
@@ -2343,6 +2363,8 @@ export const useBuildSessionStore = create<BuildSessionStore>()((set, get) => ({
         outputInventoryRequests.get(sessionId)?.controller.abort();
         const skillsStaleRevisionBeforeRestore: number | undefined =
           get().sessions.get(sessionId)?.skillsStaleRevision;
+        const skillOmissionsRevisionBeforeRestore: number | undefined =
+          get().sessions.get(sessionId)?.skillOmissionsRevision;
         try {
           sessionData = await restoreSession(sessionId);
           if (!isCurrentRuntimeLoad()) return;
@@ -2359,6 +2381,9 @@ export const useBuildSessionStore = create<BuildSessionStore>()((set, get) => ({
           return;
         }
 
+        const omissionsReadDuringRestore: boolean =
+          get().sessions.get(sessionId)?.skillOmissionsRevision !==
+          skillOmissionsRevisionBeforeRestore;
         updateSessionData(sessionId, {
           ...(isCurrentLoad() && {
             status: mapApiSessionStatus(sessionData.status),
@@ -2368,12 +2393,32 @@ export const useBuildSessionStore = create<BuildSessionStore>()((set, get) => ({
             skillsStaleRevisionBeforeRestore && {
             skillsStale: sessionData.skills_stale,
           }),
+          ...(!omissionsReadDuringRestore && {
+            skillOmissions: sessionData.skill_omissions,
+          }),
           filesNeedsRefresh:
             (get().sessions.get(sessionId)?.filesNeedsRefresh ?? 0) + 1,
           webappNeedsRefresh:
             (get().sessions.get(sessionId)?.webappNeedsRefresh ?? 0) + 1,
         });
         void get().refreshOutputInventory(sessionId, { silent: true });
+        if (omissionsReadDuringRestore) {
+          // That read may predate the restore's push; read the session again.
+          const revisionBeforeReread: number | undefined =
+            get().sessions.get(sessionId)?.skillOmissionsRevision;
+          void fetchSession(sessionId, { checkWorkspace: false })
+            .then((fresh) => {
+              if (
+                isCurrentRuntimeLoad() &&
+                get().sessions.get(sessionId)?.skillOmissionsRevision ===
+                  revisionBeforeReread
+              )
+                updateSessionData(sessionId, {
+                  skillOmissions: fresh.skill_omissions,
+                });
+            })
+            .catch(() => undefined);
+        }
 
         // App readiness controls iframe replacement, not restored filesystem access.
         void waitForWebappReady(sessionId).then(() => {

@@ -1271,6 +1271,7 @@ describe("Session loading and restoration", () => {
       agent_provider: null,
       agent_model: null,
       skills_stale: false,
+      skill_omissions: null,
       nextjs_port: null,
       session_loaded_in_sandbox: false,
       sandbox: {
@@ -1744,6 +1745,51 @@ describe("Session loading and restoration", () => {
       });
     });
 
+    it("reads omissions again when another read landed during the restore", async () => {
+      const notice = (name: string) => ({
+        skills: [
+          {
+            plugin_id: name,
+            name,
+            bytes: 1,
+            files: 1,
+            reason: "bytes" as const,
+          },
+        ],
+        max_bytes: 10,
+        max_files: 10,
+      });
+      mockedApi.fetchSession.mockResolvedValueOnce(sleepingSession() as never);
+      const restore =
+        deferred<Awaited<ReturnType<typeof api.restoreSession>>>();
+      const started = deferred<void>();
+      mockedApi.restoreSession.mockImplementation(() => {
+        started.resolve();
+        return restore.promise;
+      });
+      const loading = useBuildSessionStore.getState().loadSession(SESSION_ID);
+      await started.promise;
+      useBuildSessionStore
+        .getState()
+        .updateSessionData(SESSION_ID, { skillOmissions: notice("stale") });
+      mockedApi.fetchSession.mockResolvedValue({
+        ...runningSession(),
+        skill_omissions: notice("fresh"),
+      } as never);
+      restore.resolve({
+        ...runningSession(),
+        skill_omissions: notice("restored"),
+      } as never);
+      await loading;
+
+      await waitFor(() =>
+        expect(
+          useBuildSessionStore.getState().sessions.get(SESSION_ID)
+            ?.skillOmissions
+        ).toEqual(notice("fresh"))
+      );
+    });
+
     it("replaces in-flight inventory even when restore keeps the sandbox id", async () => {
       const store = useBuildSessionStore.getState;
       store().createSession(SESSION_ID, {
@@ -2019,10 +2065,12 @@ describe("Session loading and restoration", () => {
       mockedApi.fetchSession.mockResolvedValue({
         ...sleepingSession(),
         skills_stale: true,
+        skill_omissions: null,
       } as never);
       mockedApi.restoreSession.mockResolvedValue({
         ...runningSession(),
         skills_stale: false,
+        skill_omissions: null,
       } as never);
 
       await useBuildSessionStore.getState().loadSession(SESSION_ID);
@@ -2553,6 +2601,7 @@ describe("Session loading and restoration", () => {
       mockedApi.fetchSession.mockResolvedValue({
         ...runningSession(),
         skills_stale: true,
+        skill_omissions: null,
       } as never);
       useBuildSessionStore.getState().createSession(SESSION_ID, {
         status: "running",
@@ -2581,6 +2630,7 @@ describe("Session loading and restoration", () => {
       mockedApi.fetchSession.mockResolvedValue({
         ...runningSession(),
         skills_stale: false,
+        skill_omissions: null,
       } as never);
       useBuildSessionStore
         .getState()
@@ -2598,6 +2648,61 @@ describe("Session loading and restoration", () => {
       mockedApi.fetchSession.mockResolvedValue({
         ...runningSession(),
         skills_stale: true,
+        skill_omissions: null,
+      } as never);
+      mockedApi.fetchMessages.mockReturnValue(messages.promise as never);
+
+      const load = useBuildSessionStore
+        .getState()
+        .loadSession(SESSION_ID, { force: true });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(mockedApi.fetchMessages).toHaveBeenCalled();
+
+      const newer = {
+        skills: [
+          {
+            plugin_id: "p1",
+            name: "newer-skill",
+            bytes: 1,
+            files: 1,
+            reason: "bytes" as const,
+          },
+        ],
+        max_bytes: 10,
+        max_files: 10,
+      };
+      useBuildSessionStore.getState().updateSessionData(SESSION_ID, {
+        skillsStale: false,
+        skillOmissions: newer,
+      });
+      messages.resolve([]);
+      await load;
+
+      const session = useBuildSessionStore.getState().sessions.get(SESSION_ID);
+      expect(session?.skillsStale).toBe(false);
+      expect(session?.skillOmissions).toEqual(newer);
+    });
+
+    it("keeps a load's omissions when only the stale flag changed meanwhile", async () => {
+      const messages = deferred<unknown[]>();
+      const omissions = {
+        skills: [
+          {
+            plugin_id: "p1",
+            name: "big-skill",
+            bytes: 1,
+            files: 1,
+            reason: "bytes" as const,
+          },
+        ],
+        max_bytes: 10,
+        max_files: 10,
+      };
+      mockedApi.fetchSession.mockResolvedValue({
+        ...runningSession(),
+        skills_stale: true,
+        skill_omissions: omissions,
       } as never);
       mockedApi.fetchMessages.mockReturnValue(messages.promise as never);
 
@@ -2614,9 +2719,9 @@ describe("Session loading and restoration", () => {
       messages.resolve([]);
       await load;
 
-      expect(
-        useBuildSessionStore.getState().sessions.get(SESSION_ID)?.skillsStale
-      ).toBe(false);
+      const session = useBuildSessionStore.getState().sessions.get(SESSION_ID);
+      expect(session?.skillsStale).toBe(false);
+      expect(session?.skillOmissions).toEqual(omissions);
     });
 
     it("clears stale turn metadata when active turn lookup says no turn is running", async () => {
@@ -3540,6 +3645,7 @@ describe("session history races and discarded queued starts", () => {
       agent_provider: null,
       agent_model: null,
       skills_stale: false,
+      skill_omissions: null,
       session_loaded_in_sandbox: true,
     });
   });
@@ -4074,6 +4180,7 @@ describe("Session naming", () => {
     agent_provider: null,
     agent_model: null,
     skills_stale: false,
+    skill_omissions: null,
   };
   beforeEach(() => {
     useBuildSessionStore.setState({

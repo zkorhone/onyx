@@ -1,5 +1,7 @@
-import { useTranslations } from "next-intl";
+import { useCallback } from "react";
+import { useFormatter, useTranslations } from "next-intl";
 import type { SelectOption } from "@opal/components";
+import { FetchError, fetchErrorDetail } from "@/lib/fetcher";
 import { usePermissionAuthority } from "@/lib/permissions/hooks";
 import { useSettings } from "@/lib/settings/hooks";
 import { PluginPublishingPolicy } from "@/lib/settings/types";
@@ -9,6 +11,7 @@ import {
   INSTALLATION_POLICIES,
   type InheritOption,
 } from "@/lib/skills/installationPolicy";
+import { skillLimitOf } from "@/lib/skills/limits";
 import type { SkillInstallationPolicy } from "@/lib/skills/types";
 
 export type PublishAction = "publish" | "review" | "off";
@@ -66,4 +69,51 @@ export function usePolicyOptions({
     },
     ...options,
   ];
+}
+
+const BYTE_UNITS = ["byte", "kilobyte", "megabyte", "gigabyte"] as const;
+
+export interface SkillLimitCopy {
+  /** A binary size in the viewer's locale, such as "500 MB" for 500 MiB. */
+  formatSize: (bytes: number) => string;
+  /** The refusal of a 413 SKILL_LIMIT_EXCEEDED error, else the server's
+   * detail, else `fallback`. */
+  describeError: (error: unknown, fallback: string) => string;
+}
+
+export function useSkillLimitCopy(): SkillLimitCopy {
+  const t = useTranslations("skills.limit.refused");
+  const format = useFormatter();
+  const formatSize = useCallback(
+    (bytes: number) => {
+      let value = bytes;
+      let unit = 0;
+      while (value >= 1024 && unit < BYTE_UNITS.length - 1) {
+        value /= 1024;
+        unit += 1;
+      }
+      return format.number(value, {
+        style: "unit",
+        unit: BYTE_UNITS[unit],
+        unitDisplay: "short",
+        maximumFractionDigits: 1,
+      });
+    },
+    [format]
+  );
+  const describeError = useCallback(
+    (error: unknown, fallback: string) => {
+      const limit = skillLimitOf(error);
+      if (limit !== null)
+        return t("you", {
+          maxSize: formatSize(limit.max_bytes),
+          maxFiles: limit.max_files,
+        });
+      if (error instanceof FetchError)
+        return fetchErrorDetail(error) ?? fallback;
+      return error instanceof Error && error.message ? error.message : fallback;
+    },
+    [t, formatSize]
+  );
+  return { formatSize, describeError };
 }

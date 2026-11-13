@@ -12,7 +12,7 @@ import { useSettings } from "@/lib/settings/hooks";
 import { PluginPublishingPolicy } from "@/lib/settings/types";
 import { updateAdminSettings } from "@/lib/settings/svc";
 import { setOrganizationLibraryDefaultAccess } from "@/lib/skills/api";
-import { usePolicyOptions } from "@/lib/skills/hooks";
+import { usePolicyOptions, useSkillLimitCopy } from "@/lib/skills/hooks";
 import type {
   OrganizationLibraryDefaultAccess,
   OrganizationLibraryDefaultPolicy,
@@ -38,6 +38,7 @@ function isDefaultAccessPolicy(
  * library, and Sharing. */
 export default function SkillPublishingCard() {
   const t = useTranslations("admin.craftPreferences.publishing");
+  const { describeError } = useSkillLimitCopy();
   const settings = useSettings();
   const policy = settings.plugin_publishing ?? PluginPublishingPolicy.OPEN;
   const sharing = settings.plugin_sharing ?? true;
@@ -70,7 +71,7 @@ export default function SkillPublishingCard() {
       toast.success(t("saveSuccess.message"));
     } catch (err) {
       console.error("Failed to save a skill setting", err);
-      toast.error(err instanceof Error ? err.message : t("saveError.message"));
+      toast.error(describeError(err, t("saveError.message")));
     } finally {
       setIsSaving(false);
     }

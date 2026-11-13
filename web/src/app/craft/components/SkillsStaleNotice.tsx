@@ -6,7 +6,11 @@ import { Button, MessageCard } from "@opal/components";
 import { SvgRefreshCw } from "@opal/icons";
 import { toast } from "@opal/layouts";
 import { useBuildSessionStore } from "@/app/craft/hooks/useBuildSessionStore";
-import { reloadSessionSkills } from "@/app/craft/services/apiServices";
+import {
+  fetchSession,
+  reloadSessionSkills,
+} from "@/app/craft/services/apiServices";
+import type { ApiSessionSkillsState } from "@/app/craft/types/streamingTypes";
 
 interface SkillsStaleNoticeProps {
   sessionId: string;
@@ -24,9 +28,22 @@ export default function SkillsStaleNotice({
   );
   const reload = async () => {
     setReloading(true);
+    const revisions = () => {
+      const session = useBuildSessionStore.getState().sessions.get(sessionId);
+      return [session?.skillsStaleRevision, session?.skillOmissionsRevision];
+    };
+    const [staleBefore, omissionsBefore] = revisions();
     try {
-      const state = await reloadSessionSkills(sessionId);
-      updateSessionData(sessionId, { skillsStale: state.skills_stale });
+      let state: ApiSessionSkillsState = await reloadSessionSkills(sessionId);
+      const [staleNow, omissionsNow] = revisions();
+      if (staleNow !== staleBefore || omissionsNow !== omissionsBefore) {
+        // A read landed during the reload and may predate it; read again.
+        state = await fetchSession(sessionId, { checkWorkspace: false });
+      }
+      updateSessionData(sessionId, {
+        skillsStale: state.skills_stale,
+        skillOmissions: state.skill_omissions,
+      });
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : t("toast.reloadFailed")

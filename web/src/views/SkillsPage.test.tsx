@@ -8,6 +8,7 @@ import {
   within,
 } from "@tests/setup/test-utils";
 import SkillsPage from "@/views/SkillsPage";
+import { SWR_KEYS } from "@/lib/swr-keys";
 import type { CustomSkill, SkillsList } from "@/lib/skills/types";
 
 const mockSetSkillEnabled = jest.fn();
@@ -857,6 +858,44 @@ describe("SkillsPage preference toggles", () => {
       expect(firstSwitch).toBeEnabled();
     });
     expect(mockToastError).toHaveBeenCalledWith("Preference update failed");
+  });
+
+  it("shows a user the limit when the skill limit refuses a toggle", async () => {
+    const user = setupUser();
+    const refused = Object.assign(new Error("Refused"), {
+      errorCode: "SKILL_LIMIT_EXCEEDED",
+      responseBody: {
+        error_code: "SKILL_LIMIT_EXCEEDED",
+        detail: "Refused",
+        skill_limit: {
+          usage: { bytes: 520 * 1024 * 1024, files: 140 },
+          max_bytes: 500 * 1024 * 1024,
+          max_files: 5000,
+        },
+      },
+    });
+    mockSetSkillEnabled.mockRejectedValueOnce(refused);
+    render(<SkillsPage />);
+
+    await user.click(screen.getByRole("switch", { name: "first-skill" }));
+
+    await waitFor(() =>
+      expect(mockToastError).toHaveBeenCalledWith(
+        "This change puts you past the skill limit of 500 MB or 5,000 files. Turn off skills you do not use, then try again."
+      )
+    );
+  });
+
+  it("reloads the users past the skill limit after a toggle", async () => {
+    const user = setupUser();
+    mockSetSkillEnabled.mockResolvedValueOnce(enabledCustomAt(0));
+    render(<SkillsPage />);
+
+    await user.click(screen.getByRole("switch", { name: "first-skill" }));
+
+    await waitFor(() =>
+      expect(mockMutate).toHaveBeenCalledWith(SWR_KEYS.skillLimitUsers)
+    );
   });
 
   it("keeps a successful update when background revalidation fails", async () => {
